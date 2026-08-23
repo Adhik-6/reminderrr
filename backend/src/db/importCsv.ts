@@ -52,7 +52,14 @@ function importCsvToTable(csvFilePath: string, tableName: string) {
     // 4. Wrap inserts in a transaction for massive performance gains
     const insertMany = db.transaction((rows: Record<string, string>[]) => {
         for (const row of rows) {
-            const values = headers.map(header => row[header]);
+            const values = headers.map(header => {
+                let val = row[header];
+                // Normalize scheduled_at column to proper ISO string
+                if (header === 'scheduled_at' && val) {
+                    val = formatToIsoDate(val);
+                }
+                return val;
+            });
             insertStmt.run(values);
         }
     });
@@ -60,6 +67,19 @@ function importCsvToTable(csvFilePath: string, tableName: string) {
     // Execute the transaction
     insertMany(records);
     console.log(`Successfully imported ${records.length} rows into '${tableName}'.\n`);
+}
+
+function formatToIsoDate(dateStr: string): string {
+    if (!dateStr) return dateStr;
+    
+    // Handles formats like "2026-03-02 09:00" or "2026-03-02 09:00:00"
+    const parsedDate = new Date(dateStr.trim().replace(' ', 'T'));
+    
+    // Check if valid date, return ISO string without milliseconds
+    if (!isNaN(parsedDate.getTime())) {
+        return parsedDate.toISOString().split('.')[0]; 
+    }
+    return dateStr; // fallback if parsing fails
 }
 
 // Execute the imports

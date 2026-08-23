@@ -1,14 +1,12 @@
 import express from 'express';
 import cors from 'cors';
-import Database from 'better-sqlite3';
-import path from 'path';
+import { db } from './db/database';
+import { PolicyEngine } from "./policy/PolicyEngine";
+import { ReminderContext } from "./policy/types";
 
 const app = express();
 const PORT = 8000;
-
-// Initialize Database connection (pointing to backend/data/my_database.sqlite)
-const dbPath = path.resolve(__dirname, '../../data/my_database.sqlite');
-const db = new Database(dbPath, { readonly: true });
+const policyEngine = new PolicyEngine();
 
 // Middleware
 app.use(cors());
@@ -23,10 +21,9 @@ app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// 2. Get Upcoming Appointments (Joined with Resident details)
+// 2. Get Upcoming Appointments
 app.get('/appointments/upcoming', (req, res) => {
     try {
-        // First try to fetch appointments scheduled from today onwards
         const stmt = db.prepare(`
             SELECT 
                 a.appointment_id,
@@ -40,74 +37,41 @@ app.get('/appointments/upcoming', (req, res) => {
                 c.email
             FROM appointments a
             LEFT JOIN contacts c ON a.resident_id = c.resident_id
-            WHERE a.scheduled_at >= datetime('now')
             ORDER BY a.scheduled_at ASC
             LIMIT 50
         `);
         
-        let upcomingAppointments = stmt.all();
-
-        // Fallback: If no future dates relative to current time exist, return all sorted by date
-        if (upcomingAppointments.length === 0) {
-            const fallbackStmt = db.prepare(`
-                SELECT 
-                    a.appointment_id,
-                    a.resident_id,
-                    a.scheduled_at,
-                    a.location,
-                    a.service_type,
-                    a.status,
-                    c.name AS resident_name,
-                    c.mobile,
-                    c.email
-                FROM appointments a
-                LEFT JOIN contacts c ON a.resident_id = c.resident_id
-                ORDER BY a.scheduled_at ASC
-                LIMIT 50
-            `);
-            upcomingAppointments = fallbackStmt.all();
-        }
-
-        res.json({ 
-            success: true, 
-            count: upcomingAppointments.length, 
-            data: upcomingAppointments 
-        });
+        const appointments = stmt.all();
+        res.json({ success: true, count: appointments.length, data: appointments });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, error: 'Database query failed' });
     }
 });
 
-// 3. Get Joined Resident Info by ID (e.g. /resident/RS-4000 or /resident/RS-4396)
+// 3. Get Resident Info
 app.get('/resident/:id', (req, res) => {
     const residentId = req.params.id;
-    
     try {
-        // Fetch contact details for the resident
-        const residentStmt = db.prepare(`SELECT * FROM contacts WHERE resident_id = ?`);
-        const resident = residentStmt.get(residentId);
+        const resident = db.prepare(`SELECT * FROM contacts WHERE resident_id = ?`).get(residentId);
         
         if (!resident) {
             res.status(404).json({ success: false, error: `Resident '${residentId}' not found` });
             return;
         }
 
-        // Fetch all appointments for this specific resident
-        const aptStmt = db.prepare(`
+        const appointments = db.prepare(`
             SELECT appointment_id, scheduled_at, location, service_type, status 
             FROM appointments 
             WHERE resident_id = ? 
             ORDER BY scheduled_at DESC
-        `);
-        const appointments = aptStmt.all(residentId);
+        `).all(residentId);
         
-        // Return joined object containing resident contact details + their array of appointments
         res.json({
             success: true,
             data: {
                 ...resident,
-                appointments: appointments
+                appointments
             }
         });
     } catch (error) {
@@ -116,7 +80,50 @@ app.get('/resident/:id', (req, res) => {
     }
 });
 
-// Start Server
+app.post("/policy/evaluate", (req, res) => {
+
+  const { residentId, appointmentId } = req.body;
+
+  try {
+
+    const resident = db.prepare(
+      `SELECT * FROM contacts WHERE resident_id = ?`
+    ).get(residentId);
+
+    const appointment = db.prepare(
+      `SELECT * FROM appointments WHERE appointment_id = ?`
+    ).get(appointmentId);
+
+    if (!resident || !appointment) {
+      return res.status(404).json({
+        success: false,
+        error: "Resident or appointment not found."
+      });
+    }
+
+    const context: ReminderContext = {
+      resident: resident as any,
+      appointment: appointment as any,
+      now: new Date()
+    };
+
+    const decision = policyEngine.evaluate(context);
+
+    res.json({
+      success: true,
+      context,
+      decision
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: "Policy evaluation failed."
+    });
+  }
+});
+
 app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
