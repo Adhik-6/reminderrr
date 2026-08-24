@@ -8,9 +8,7 @@ import { ContactFrequencyRule } from "./rules/contactFrequency";
 import { db } from "../db/database";
 
 export class PolicyEngine {
-
   private rules: PolicyRule[];
-
   constructor() {
     this.rules = [
       new QuietHoursRule(),
@@ -22,18 +20,11 @@ export class PolicyEngine {
   }
 
   evaluate(context: ReminderContext): PolicyDecision {
-
-    let decision: PolicyDecision = {
-      allowed: true
-    };
+    let decision: PolicyDecision = {allowed: true};
 
     for (const rule of this.rules) {
-
       decision = rule.execute(context, decision);
-
-      if (!decision.allowed) {
-        break;
-      }
+      if (!decision.allowed) break;
     }
 
     return decision;

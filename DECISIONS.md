@@ -1,31 +1,69 @@
-
-This file should contain:
-    1. What you chose
-    2. What you rejected, and why
-    3. What you cut for time
-    4. What your solution does not do
-    5. What you would fix first
-
 # DECISIONS
 
-## Tech Stack
-1. **Backend**: **Pyhton** would have been a better option as the given simulation code (like `channels.py` & `demo.py`) was in python but i went with **Node.js with Express** as i was familiar with it and it is lightweight and easy to set up. I used **typescript** for better type safety over **JavaScript**.
-2. **Database**: Although i was familiar with **MongoDB**, i chose **SQLite** for this project as it seemed to be the best option for a small projects where i need to get the project working quickly. Also, the given CSV data would fit really well in a relational database like SQLite. I rejected **PostgreSQL** and **MySQL** as they would consme lot of set up time and not so familiar with them. 3. **Queueing**: This is my first time using a queueing system, so i went with **BullMQ** as it seemed to have **built-in retries** and **delayed jobs**. 
+## What I chose
 
-## API Design
-1. `GET /fetch` - This endpoint is used to fetch the appointments with specific constraints that will be helpful for testing specific scenarios without injecting manual database entries.
+### Tech Stack
 
-## Architectural Decisions
+- **Backend:** Node.js with Express and TypeScript. Although the provided simulation code was written in Python, I chose Node.js because I was more familiar with it, allowing faster development while still integrating with the provided Python simulator.
+- **Database:** SQLite. The provided CSV data mapped naturally to relational tables, required almost no setup, and made the project easy for judges to run locally.
+- **Queueing:** A custom SQLite-backed queue with a background worker. I initially planned to use BullMQ with Redis, but replaced it with SQLite to remove external dependencies while still supporting delayed jobs, retries, and fallback logic.
 
-### Database
-1. Indexing: I created indexes on the below columns in the respective tables to speed up the queries:
-   - contacts - `resident_id`
-   - appointments - `resident_id`, `scheduled_at`
-2. A table called `delivery_log` was created to log the decisions made by the policy engine. This was done to keep track of the reminders sent and to avoid sending duplicate reminders.
+### Architecture
 
-### Policy for sending reminders
-The `/backend/src/policy` folder contains the policy for sending reminders. The sub-ploicies or rules are separated into different files for better maintainability and to handle any new rules that might be included in the requirement changes during the day 2 surprise challenge as mentioned in the project description. 
+- Imported the provided CSV files into SQLite instead of reading CSVs directly at runtime.
+- Built a modular Policy Engine where each rule lives in its own file, making it easier to extend for the Day 2 surprise challenge.
+- Used `delivery_log` as the source of truth for auditing every outbound attempt and for calculating the rolling seven-day contact limit.
+- Added `blocked_contacts` to record reminders withheld due to the regulator's limit.
 
-### Reminder Queue
-The reminder queue is implemented using **BullMQ**. 
-Initially I planned of using redis for storing the jobs (future appointments) but decided to use **SQLite** as it lot more easier to set up compared redis. Thus it will also be easier for the reviewer to test the project.
+### API Design
+
+- Added `GET /fetch` to retrieve appointments matching specific conditions, making it easier to test edge cases without manually editing the database.
+- Separated Express routes into individual modules instead of keeping everything in `index.ts` for better maintainability.
+
+### Database Optimizations
+
+Created indexes on:
+
+- `contacts(resident_id)`
+- `appointments(resident_id)`
+- `appointments(scheduled_at)`
+
+to speed up common lookups.
+
+---
+
+## What I rejected and why
+
+- **Python backend:** Rejected despite the provided simulator because switching stacks would have slowed development.
+- **MongoDB:** Rejected because relational queries suited the dataset better.
+- **PostgreSQL/MySQL:** Rejected because they required additional setup that wasn't necessary for this project's scale.
+- **BullMQ + Redis:** Rejected in the final implementation because requiring Redis would make the project harder to run for judges.
+
+---
+
+## What I cut for time
+
+- A frontend dashboard for live queue monitoring.
+- Real translated message templates (used language indicators instead).
+- Dynamic worker sleep scheduling instead of a one-second polling interval.
+- More advanced retry policies with exponential backoff.
+- Appointment prioritization when multiple reminders compete for the remaining contact allowance.
+
+---
+
+## What my solution does not do
+
+- It does not send real SMS, voice calls, or emails; it uses the provided Python simulation.
+- It does not provide a production-grade distributed queue.
+- It does not translate reminder text into multiple languages.
+- It does not guarantee fairness beyond the implemented regulatory rules when multiple appointments compete for contact limits.
+
+---
+
+## What I would fix first
+
+1. Replace the polling worker with an event-driven scheduler.
+2. Add real multilingual templates.
+3. Build a frontend analytics dashboard showing queue status, delivery outcomes, and compliance metrics.
+4. Improve retry behavior using adaptive backoff based on provider failures.
+5. Add configurable prioritization for appointments affected by contact limits.

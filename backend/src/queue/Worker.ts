@@ -20,22 +20,16 @@ console.log("Worker started.");
 function retryDelay(detail: string) {
 
   switch (detail) {
-
     case "busy":
       return 10;
-
     case "no_answer":
       return 15;
-
     case "carrier_rejected":
       return 30;
-
     case "soft_bounce":
       return 60;
-
     default:
       return null;
-
   }
 
 }
@@ -43,27 +37,17 @@ function retryDelay(detail: string) {
 async function processJobs() {
 
   if (isProcessing) return;
-
   isProcessing = true;
 
   try {
-
     const jobs = queueService.claimDueJobs();
 
-    if (jobs.length)
-      console.log(`Found ${jobs.length} due job(s).`);
-
+    if (jobs.length) console.log(`Found ${jobs.length} due job(s).`);
     for (const job of jobs) {
-
-      const channel =
-        CHANNELS[job.fallback_index] ?? "sms";
-
-      console.log(
-        `Job #${job.job_id} -> ${channel}`
-      );
+      const channel = CHANNELS[job.fallback_index] ?? "sms";
+      console.log(`Job #${job.job_id} -> ${channel}`);
 
       try {
-
         const result =
           await reminderService.sendReminder({
             residentId: job.resident_id,
@@ -71,37 +55,45 @@ async function processJobs() {
             attempt: job.attempt,
             forceChannel: channel
           });
-
-        const status =
-          result.providerResult?.status;
-
-        const detail =
-          result.providerResult?.detail || "";
+          
+        // Policy blocked the reminder before reaching a provider.
+        if (!result.decision.allowed) {
+          if (result.decision.reason === "Reminder blocked during quiet hours.") {
+            const nextHour = new Date();
+            nextHour.setHours(nextHour.getHours() + 1);
+            queueService.rescheduleJob(
+              job.job_id,
+              nextHour,
+              job.attempt,
+              job.fallback_index,
+              channel,
+              "quiet_hours"
+            );
+            console.log("🌙 Quiet hours – postponed for one hour.");
+          } else {
+            // Regulatory block or another permanent policy block.
+            queueService.markCompleted(job.job_id);
+            console.log(`🚫 ${result.decision.reason}`);
+          }
+          continue;
+        }
+        const status = result.providerResult?.status;
+        const detail = result.providerResult?.detail || "";
 
         // SUCCESS
-
         if (
           status === "delivered" ||
           status === "answered" ||
           detail === "voicemail_left"
         ) {
-
           queueService.markCompleted(job.job_id);
-
-          console.log(
-            `✓ Completed via ${channel}`
-          );
-
+          console.log(`✓ Completed via ${channel}`);
           continue;
-
         }
 
         // RETRY
-
         const delay = retryDelay(detail);
-
         if (delay && job.attempt < 3) {
-
           queueService.rescheduleJob(
             job.job_id,
             new Date(Date.now() + delay * 60 * 1000),
@@ -110,22 +102,13 @@ async function processJobs() {
             channel,
             detail
           );
-
-          console.log(
-            `↺ Retry ${channel} in ${delay} min`
-          );
-
+          console.log(`↺ Retry ${channel} in ${delay} min`);
           continue;
-
         }
 
         // FALLBACK
-
-        const nextIndex =
-          job.fallback_index + 1;
-
+        const nextIndex = job.fallback_index + 1;
         if (nextIndex < CHANNELS.length) {
-
           queueService.rescheduleJob(
             job.job_id,
             new Date(),
@@ -134,43 +117,22 @@ async function processJobs() {
             CHANNELS[nextIndex],
             detail
           );
-
-          console.log(
-            `➡ Falling back to ${CHANNELS[nextIndex]}`
-          );
-
+          console.log(`➡ Falling back to ${CHANNELS[nextIndex]}`);
         } else {
-
           queueService.markFailed(
             job.job_id,
             detail
           );
-
-          console.log(
-            `✗ Permanent failure`
-          );
-
+          console.log(`✗ Permanent failure`);
         }
-
       } catch (err) {
-
         console.error(err);
-
-        queueService.markFailed(
-          job.job_id,
-          "worker_error"
-        );
-
+        queueService.markFailed(job.job_id, "worker_error" );
       }
-
     }
-
   } finally {
-
     isProcessing = false;
-
   }
-
 }
 
 setInterval(processJobs, 1000);

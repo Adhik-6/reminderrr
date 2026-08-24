@@ -12,8 +12,17 @@ interface SendReminderOptions {
   forceChannel?: "sms" | "voice" | "email";
 }
 
-export class ReminderService {
+function buildReminderMessage(
+  serviceType: string,
+  scheduledAt: string,
+  location: string,
+  language: string = "en"
+): string {
+  const prefix = language === "en" ? "Reminder" : `Reminder (in ${language})`;
+  return `${prefix}: Your ${serviceType} appointment is scheduled for ${scheduledAt} at ${location}.`;
+}
 
+export class ReminderService {
   constructor(
     private db: Database.Database,
     private policyEngine: PolicyEngine,
@@ -21,17 +30,16 @@ export class ReminderService {
   ) {}
 
   async sendReminder(options: SendReminderOptions) {
-
     const now = options.now ?? new Date();
     const attempt = options.attempt ?? 1;
 
-    const resident = this.db.prepare(
-      `SELECT * FROM contacts WHERE resident_id=?`
-    ).get(options.residentId) as any;
+    const resident = this.db
+      .prepare(`SELECT * FROM contacts WHERE resident_id=?`)
+      .get(options.residentId) as any;
 
-    const appointment = this.db.prepare(
-      `SELECT * FROM appointments WHERE appointment_id=?`
-    ).get(options.appointmentId) as any;
+    const appointment = this.db
+      .prepare(`SELECT * FROM appointments WHERE appointment_id=?`)
+      .get(options.appointmentId) as any;
 
     if (!resident || !appointment) {
       throw new Error("Resident or appointment not found.");
@@ -52,21 +60,29 @@ export class ReminderService {
       };
     }
 
-    const channel =
-    options.forceChannel ?? decision.channel!;
+    const channel = options.forceChannel ?? decision.channel;
 
     const provider = ProviderFactory.get(channel);
 
-    const recipient = 
-        channel === "email"
-            ? resident.email
-            : channel === "voice"
-                ? resident.landline || resident.mobile
-                : resident.mobile;
+    // 1. Ensure recipient is typed as a defined string
+    const recipient: string =
+      (channel === "email"
+        ? resident.email
+        : channel === "voice"
+        ? resident.landline || resident.mobile
+        : resident.mobile) ?? "";
 
-    const body =
-      `Reminder: Your ${appointment.service_type} appointment ` +
-      `is scheduled for ${appointment.scheduled_at}.`;
+    if (!recipient) {
+      throw new Error(`No valid contact endpoint found for channel: ${channel}`);
+    }
+
+    // 2. Fallback for optional decision.language
+    const body = buildReminderMessage(
+      appointment.service_type ?? "",
+      appointment.scheduled_at ?? "",
+      appointment.location ?? "",
+      decision.language ?? "en"
+    );
 
     const providerResult = await provider.send({
       recipient,
@@ -75,10 +91,11 @@ export class ReminderService {
       attempt
     });
 
+    // 3. Pass non-null 'channel' variable instead of 'decision.channel'
     this.deliveryLogger.log({
       residentId: resident.resident_id,
       appointmentId: appointment.appointment_id,
-      channel: decision.channel,
+      channel: channel,
       status: providerResult.status,
       detail: providerResult.detail,
       attemptedAt: now,
@@ -86,9 +103,9 @@ export class ReminderService {
     });
 
     return {
-        decision,
-        providerResult,
-        channel
+      decision,
+      providerResult,
+      channel
     };
   }
 }
