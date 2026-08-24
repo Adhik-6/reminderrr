@@ -30,6 +30,7 @@ export interface ReminderContext {
 export interface PolicyDecision {
   allowed: boolean;
   channel?: "sms" | "voice" | "email";
+  channelCandidates?: ("sms" | "voice" | "email")[];
   language?: string;
   template?: string;
   reason?: string;

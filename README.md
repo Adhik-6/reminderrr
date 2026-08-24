@@ -2,6 +2,10 @@
 
 # Instructions to getting started
 
+## Pre-requisites
+- Node.js
+- Python
+
 ## Install dependencies
 At the root of the project, run the following command
 ```bash

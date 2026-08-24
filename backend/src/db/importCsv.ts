@@ -3,10 +3,13 @@ import * as fs from 'fs';
 import { parse } from 'csv-parse/sync';
 import * as path from 'path';
 
-// File paths (adjust these if your script is in a different directory relative to /data)
+// File paths
 const DB_PATH = path.resolve(__dirname, '../../../data/my_database.sqlite');
 const APPOINTMENTS_CSV = path.resolve(__dirname, '../../../data/appointments.csv');
 const CONTACTS_CSV = path.resolve(__dirname, '../../../data/contacts.csv');
+
+// Ensure target directory exists before opening SQLite database
+fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 // Initialize SQLite Database
 const db = new Database(DB_PATH);
@@ -82,10 +85,50 @@ function formatToIsoDate(dateStr: string): string {
     return dateStr; // fallback if parsing fails
 }
 
-// Execute the imports
+/**
+ * Initializes persistent tables and performance indexes.
+ */
+function setupDatabaseSchema() {
+    console.log('Setting up persistent tables and indexes...');
+
+    // 1. Create delivery_log table IF NOT EXISTS (Preserves existing delivery log data across imports)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS delivery_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            resident_id TEXT,
+            appointment_id TEXT,
+            channel TEXT,
+            status TEXT,
+            detail TEXT,
+            attempted_at TEXT,
+            body_preview TEXT
+        );
+    `);
+
+    // 2. Create performance indexes
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_contacts_resident_id 
+        ON contacts (resident_id);
+
+        CREATE INDEX IF NOT EXISTS idx_appointments_resident_id 
+        ON appointments (resident_id);
+
+        CREATE INDEX IF NOT EXISTS idx_appointments_scheduled_at 
+        ON appointments (scheduled_at);
+    `);
+
+    console.log('✅ Tables and indexes ready.\n');
+}
+
+// Execute the script workflow
 try {
+    // Import CSVs (Recreates contacts and appointments)
     importCsvToTable(CONTACTS_CSV, 'contacts');
     importCsvToTable(APPOINTMENTS_CSV, 'appointments');
+
+    // Setup delivery_log table and create indexes
+    setupDatabaseSchema();
+
     console.log(`✅ All imports finished! Database saved to: ${DB_PATH}`);
 } catch (error) {
     console.error('An error occurred during import:', error);

@@ -3,10 +3,13 @@ import cors from 'cors';
 import { db } from './db/database';
 import { PolicyEngine } from "./policy/PolicyEngine";
 import { ReminderContext } from "./policy/types";
+import { ProviderFactory } from "./providers/providerFactory";
+import { DeliveryLogger } from "./services/DeliveryLogger";
 
 const app = express();
 const PORT = 8000;
 const policyEngine = new PolicyEngine();
+const deliveryLogger = new DeliveryLogger(db);
 
 // Middleware
 app.use(cors());
@@ -121,6 +124,208 @@ app.post("/policy/evaluate", (req, res) => {
       success: false,
       error: "Policy evaluation failed."
     });
+  }
+});
+
+app.post("/simulate/send", async (req, res) => {
+  const { residentId, appointmentId, simulateTime } = req.body;
+
+  try {
+    const resident = db.prepare(
+      `SELECT * FROM contacts WHERE resident_id = ?`
+    ).get(residentId) as any;
+
+    const appointment = db.prepare(
+      `SELECT * FROM appointments WHERE appointment_id = ?`
+    ).get(appointmentId) as any;
+
+    if (!resident || !appointment) {
+      return res.status(404).json({
+        success: false,
+        error: "Resident or appointment not found."
+      });
+    }
+
+    const context: ReminderContext = {
+      resident,
+      appointment,
+      now: simulateTime
+        ? new Date(simulateTime)
+        : new Date()
+    };
+
+    const decision = policyEngine.evaluate(context);
+
+    if (!decision.allowed || !decision.channel) {
+      return res.json({
+        success: true,
+        decision,
+        providerResult: null
+      });
+    }
+
+    const provider = ProviderFactory.get(decision.channel);
+    const recipient =
+      decision.channel === "email"
+        ? resident.email
+        : decision.channel === "voice"
+        ? resident.landline || resident.mobile
+        : resident.mobile;
+
+    const body =
+      `Reminder: Your ${appointment.service_type} appointment is scheduled for ` +
+      `${appointment.scheduled_at}.`;
+
+    const providerResult = await provider.send({
+      recipient,
+      body,
+      at: context.now,
+      attempt: 1
+    });
+
+    deliveryLogger.log({
+      residentId: resident.resident_id,
+      appointmentId: appointment.appointment_id,
+      channel: decision.channel,
+      status: providerResult.status,
+      detail: providerResult.detail,
+      attemptedAt: context.now,
+      bodyPreview: body
+    });
+
+    res.json({
+      success: true,
+      decision,
+      providerResult
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: "Simulation failed."
+    });
+
+  }
+
+});
+
+app.get("/delivery-log", (req, res) => {
+
+  try {
+    const logs = db.prepare(`
+      SELECT
+        id,
+        resident_id,
+        appointment_id,
+        channel,
+        status,
+        detail,
+        attempted_at,
+        body_preview
+      FROM delivery_log
+      ORDER BY attempted_at DESC
+      LIMIT 100
+    `).all();
+
+    res.json({
+      success: true,
+      count: logs.length,
+      data: logs
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: "Could not fetch delivery log."
+    });
+
+  }
+
+});
+
+app.get("/fetch", (req, res) => {
+  try {
+    const {
+      lang,
+      sms_optout,
+      voice_optout,
+      email_optout,
+      mobile,
+      shared_mobile,
+      appointments_gt
+    } = req.query;
+
+    let sql = `
+      SELECT
+        c.*,
+        COUNT(a.appointment_id) AS appointment_count
+      FROM contacts c
+      LEFT JOIN appointments a
+      ON c.resident_id = a.resident_id
+    `;
+
+    const where: string[] = [];
+    const params: any[] = [];
+
+    if (lang) {
+      where.push("c.language = ?");
+      params.push(lang);
+    }
+    if (sms_optout) {
+      where.push("c.sms_optout = ?");
+      params.push(sms_optout);
+    }
+    if (voice_optout) {
+      where.push("c.voice_optout = ?");
+      params.push(voice_optout);
+    }
+    if (email_optout) {
+      where.push("c.email_optout = ?");
+      params.push(email_optout);
+    }
+    if (mobile === "missing") {
+      where.push("(c.mobile IS NULL OR c.mobile = '')");
+    }
+    if (shared_mobile === "true") {
+      where.push(`
+        c.mobile IN (
+          SELECT mobile
+          FROM contacts
+          WHERE mobile IS NOT NULL
+          AND mobile <> ''
+          GROUP BY mobile
+          HAVING COUNT(*) > 1
+        )
+      `);
+    }
+    if (where.length) sql += " WHERE " + where.join(" AND ");
+
+    sql += `
+      GROUP BY c.resident_id
+    `;
+    if (appointments_gt) {
+      sql += ` HAVING appointment_count > ?`;
+      params.push(Number(appointments_gt));
+    }
+
+    sql += ` ORDER BY c.resident_id LIMIT 100`;
+    const rows = db.prepare(sql).all(...params);
+
+    res.json({
+      success: true,
+      count: rows.length,
+      filters: req.query,
+      data: rows
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      error: "Fetch failed."
+    });
+
   }
 });
 

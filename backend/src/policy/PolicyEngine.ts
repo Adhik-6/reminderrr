@@ -1,6 +1,6 @@
 import { ReminderContext, PolicyDecision, PolicyRule } from "./types";
 
-import { PreferredChannelRule } from "./rules/preferredChannel";
+import { ChannelSelectionRule } from "./rules/channelSelectionRule";
 import { OptOutRule } from "./rules/optOut";
 import { QuietHoursRule } from "./rules/quietHours";
 import { LanguageRule } from "./rules/language";
@@ -11,9 +11,9 @@ export class PolicyEngine {
 
   constructor() {
     this.rules = [
-      new PreferredChannelRule(),
-      new OptOutRule(),
       new QuietHoursRule(),
+      new ChannelSelectionRule(),
+      new OptOutRule(),
       new LanguageRule()
     ];
   }
