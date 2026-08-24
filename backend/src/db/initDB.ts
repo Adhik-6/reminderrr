@@ -1,18 +1,11 @@
-import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import { parse } from 'csv-parse/sync';
 import * as path from 'path';
+import { db } from './database';
 
-// File paths
-const DB_PATH = path.resolve(__dirname, '../../../data/my_database.sqlite');
+// CSV File paths
 const APPOINTMENTS_CSV = path.resolve(__dirname, '../../../data/appointments.csv');
 const CONTACTS_CSV = path.resolve(__dirname, '../../../data/contacts.csv');
-
-// Ensure target directory exists before opening SQLite database
-fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-
-// Initialize SQLite Database
-const db = new Database(DB_PATH);
 
 /**
  * Reads a CSV file and inserts it into a dynamically created SQLite table.
@@ -52,7 +45,7 @@ function importCsvToTable(csvFilePath: string, tableName: string) {
     const insertSql = `INSERT INTO "${tableName}" (${headers.map(h => `"${h}"`).join(', ')}) VALUES (${placeholders})`;
     const insertStmt = db.prepare(insertSql);
 
-    // 4. Wrap inserts in a transaction for massive performance gains
+    // 4. Wrap inserts in a transaction for performance gains
     const insertMany = db.transaction((rows: Record<string, string>[]) => {
         for (const row of rows) {
             const values = headers.map(header => {
@@ -91,7 +84,7 @@ function formatToIsoDate(dateStr: string): string {
 function setupDatabaseSchema() {
     console.log('Setting up persistent tables and indexes...');
 
-    // 1. Create delivery_log table IF NOT EXISTS (Preserves existing delivery log data across imports)
+    // 1. Create persistent tables (IF NOT EXISTS preserves existing log and queue data across CSV re-imports)
     db.exec(`
         CREATE TABLE IF NOT EXISTS delivery_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,6 +95,18 @@ function setupDatabaseSchema() {
             detail TEXT,
             attempted_at TEXT,
             body_preview TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS reminder_queue (
+            job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            resident_id TEXT NOT NULL,
+            appointment_id TEXT NOT NULL,
+            scheduled_for TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempt INTEGER NOT NULL DEFAULT 1,
+            last_error TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            processed_at TEXT
         );
     `);
 
@@ -115,9 +120,12 @@ function setupDatabaseSchema() {
 
         CREATE INDEX IF NOT EXISTS idx_appointments_scheduled_at 
         ON appointments (scheduled_at);
+
+        CREATE INDEX IF NOT EXISTS idx_queue_status_time
+        ON reminder_queue(status, scheduled_for);
     `);
 
-    console.log('✅ Tables and indexes ready.\n');
+    console.log('✅ Persistent tables and indexes ready.\n');
 }
 
 // Execute the script workflow
@@ -126,13 +134,13 @@ try {
     importCsvToTable(CONTACTS_CSV, 'contacts');
     importCsvToTable(APPOINTMENTS_CSV, 'appointments');
 
-    // Setup delivery_log table and create indexes
+    // Setup persistent tables (delivery_log, reminder_queue) and create indexes
     setupDatabaseSchema();
 
-    console.log(`✅ All imports finished! Database saved to: ${DB_PATH}`);
+    console.log(`✅ All imports finished!`);
 } catch (error) {
     console.error('An error occurred during import:', error);
 } finally {
-    // Always safely close the database connection
+    // Safely close the database connection when CLI import finishes
     db.close();
 }

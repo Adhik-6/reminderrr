@@ -25,3 +25,7 @@ This file should contain:
 
 ### Policy for sending reminders
 The `/backend/src/policy` folder contains the policy for sending reminders. The sub-ploicies or rules are separated into different files for better maintainability and to handle any new rules that might be included in the requirement changes during the day 2 surprise challenge as mentioned in the project description. 
+
+### Reminder Queue
+The reminder queue is implemented using **BullMQ**. 
+Initially I planned of using redis for storing the jobs (future appointments) but decided to use **SQLite** as it lot more easier to set up compared redis. Thus it will also be easier for the reviewer to test the project.

@@ -5,9 +5,10 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "nodemon --watch src -e ts --exec tsx src/index.ts",
-    "db:import": "tsx src/db/importCsv.ts",
+    "db:init": "tsx src/db/initDB.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "worker": "tsx src/queue/Worker.ts"
   },
   "keywords": [],
   "author": "",

@@ -16,7 +16,7 @@ Quiet hours, opt-outs, deduplication and stopping rules are yours to implement.
 import hashlib, json, os
 from datetime import datetime
 
-OUTBOX = os.environ.get('OUTBOX_PATH', 'outbox.jsonl')
+OUTBOX = os.environ.get('OUTBOX_PATH', '../channels/outbox.jsonl')
 
 def _roll(*parts):
     h = hashlib.sha256('|'.join(str(p) for p in parts).encode()).hexdigest()
