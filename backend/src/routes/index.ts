@@ -5,5 +5,6 @@ import simulationRoutes from "./simulation";
 import fetchRoutes from "./fetch";
 import deliveryRoutes from "./delivery";
 import policyRoutes from "./policy";
+import metricRoutes from "./metrics"
 
-export { healthRoutes, appointmentRoutes, residentRoutes, simulationRoutes, fetchRoutes, deliveryRoutes, policyRoutes };
+export { healthRoutes, appointmentRoutes, residentRoutes, simulationRoutes, fetchRoutes, deliveryRoutes, policyRoutes, metricRoutes };

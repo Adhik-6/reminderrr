@@ -79,12 +79,12 @@ function formatToIsoDate(dateStr: string): string {
 }
 
 /**
- * Initializes persistent tables and performance indexes.
+ * Initializes persistent tables, migrations, and performance indexes.
  */
 function setupDatabaseSchema() {
     console.log('Setting up persistent tables and indexes...');
 
-    // 1. Create persistent tables (IF NOT EXISTS preserves existing log and queue data across CSV re-imports)
+    // 1. Create persistent tables (IF NOT EXISTS preserves existing log, queue, and blocklist data across CSV re-imports)
     db.exec(`
         CREATE TABLE IF NOT EXISTS delivery_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,13 +104,41 @@ function setupDatabaseSchema() {
             scheduled_for TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
             attempt INTEGER NOT NULL DEFAULT 1,
+            current_channel TEXT,
+            next_attempt_at TEXT,
+            fallback_index INTEGER DEFAULT 0,
             last_error TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             processed_at TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS blocked_contacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            resident_id TEXT NOT NULL,
+            appointment_id TEXT NOT NULL,
+            blocked_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            reason TEXT NOT NULL,
+            contacts_last_7_days INTEGER NOT NULL
+        );
     `);
 
-    // 2. Create performance indexes
+    // 2. Run inline migrations for existing databases missing these columns
+    const columnsToEnsure = [
+        { name: 'current_channel', type: 'TEXT' },
+        { name: 'next_attempt_at', type: 'TEXT' },
+        { name: 'fallback_index', type: 'INTEGER DEFAULT 0' },
+        { name: 'last_error', type: 'TEXT' }
+    ];
+
+    for (const col of columnsToEnsure) {
+        try {
+            db.exec(`ALTER TABLE reminder_queue ADD COLUMN ${col.name} ${col.type};`);
+        } catch {
+            // Ignore error if column already exists in table
+        }
+    }
+
+    // 3. Create performance indexes
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_contacts_resident_id 
         ON contacts (resident_id);
@@ -123,6 +151,9 @@ function setupDatabaseSchema() {
 
         CREATE INDEX IF NOT EXISTS idx_queue_status_time
         ON reminder_queue(status, scheduled_for);
+
+        CREATE INDEX IF NOT EXISTS idx_blocked_contacts_resident_id
+        ON blocked_contacts(resident_id);
     `);
 
     console.log('✅ Persistent tables and indexes ready.\n');
@@ -134,7 +165,7 @@ try {
     importCsvToTable(CONTACTS_CSV, 'contacts');
     importCsvToTable(APPOINTMENTS_CSV, 'appointments');
 
-    // Setup persistent tables (delivery_log, reminder_queue) and create indexes
+    // Setup persistent tables and indexes
     setupDatabaseSchema();
 
     console.log(`✅ All imports finished!`);

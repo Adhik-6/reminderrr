@@ -4,6 +4,8 @@ import { ChannelSelectionRule } from "./rules/channelSelectionRule";
 import { OptOutRule } from "./rules/optOut";
 import { QuietHoursRule } from "./rules/quietHours";
 import { LanguageRule } from "./rules/language";
+import { ContactFrequencyRule } from "./rules/contactFrequency";
+import { db } from "../db/database";
 
 export class PolicyEngine {
 
@@ -12,6 +14,7 @@ export class PolicyEngine {
   constructor() {
     this.rules = [
       new QuietHoursRule(),
+      new ContactFrequencyRule(db),
       new ChannelSelectionRule(),
       new OptOutRule(),
       new LanguageRule()

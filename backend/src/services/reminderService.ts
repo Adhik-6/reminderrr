@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { PolicyEngine } from "../policy/PolicyEngine";
 import { ReminderContext } from "../policy/types";
-import { ProviderFactory } from "../providers/ProviderFactory";
+import { ProviderFactory } from "../providers/providerFactory";
 import { DeliveryLogger } from "./DeliveryLogger";
 
 interface SendReminderOptions {
@@ -9,6 +9,7 @@ interface SendReminderOptions {
   appointmentId: string;
   now?: Date;
   attempt?: number;
+  forceChannel?: "sms" | "voice" | "email";
 }
 
 export class ReminderService {
@@ -51,14 +52,17 @@ export class ReminderService {
       };
     }
 
-    const provider = ProviderFactory.get(decision.channel);
+    const channel =
+    options.forceChannel ?? decision.channel!;
 
-    const recipient =
-      decision.channel === "email"
-        ? resident.email
-        : decision.channel === "voice"
-        ? resident.landline || resident.mobile
-        : resident.mobile;
+    const provider = ProviderFactory.get(channel);
+
+    const recipient = 
+        channel === "email"
+            ? resident.email
+            : channel === "voice"
+                ? resident.landline || resident.mobile
+                : resident.mobile;
 
     const body =
       `Reminder: Your ${appointment.service_type} appointment ` +
@@ -82,8 +86,9 @@ export class ReminderService {
     });
 
     return {
-      decision,
-      providerResult
+        decision,
+        providerResult,
+        channel
     };
   }
 }

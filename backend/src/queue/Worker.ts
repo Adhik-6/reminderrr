@@ -5,18 +5,40 @@ import { ReminderService } from "../services/reminderService";
 import { db } from "../db/database";
 
 const queueService = new QueueService(db);
-
-const policyEngine = new PolicyEngine();
-
-const deliveryLogger = new DeliveryLogger(db);
-
 const reminderService = new ReminderService(
   db,
-  policyEngine,
-  deliveryLogger
+  new PolicyEngine(),
+  new DeliveryLogger(db)
 );
 
+const CHANNELS = ["sms", "voice", "email"] as const;
+
 let isProcessing = false;
+
+console.log("Worker started.");
+
+function retryDelay(detail: string) {
+
+  switch (detail) {
+
+    case "busy":
+      return 10;
+
+    case "no_answer":
+      return 15;
+
+    case "carrier_rejected":
+      return 30;
+
+    case "soft_bounce":
+      return 60;
+
+    default:
+      return null;
+
+  }
+
+}
 
 async function processJobs() {
 
@@ -28,33 +50,116 @@ async function processJobs() {
 
     const jobs = queueService.claimDueJobs();
 
-    if (jobs.length > 0) {
+    if (jobs.length)
       console.log(`Found ${jobs.length} due job(s).`);
-    }
 
     for (const job of jobs) {
 
-      console.log(`Processing Job #${job.job_id}`);
+      const channel =
+        CHANNELS[job.fallback_index] ?? "sms";
+
+      console.log(
+        `Job #${job.job_id} -> ${channel}`
+      );
 
       try {
 
-        const result = await reminderService.sendReminder({
-          residentId: job.resident_id,
-          appointmentId: job.appointment_id,
-          attempt: job.attempt
-        });
+        const result =
+          await reminderService.sendReminder({
+            residentId: job.resident_id,
+            appointmentId: job.appointment_id,
+            attempt: job.attempt,
+            forceChannel: channel
+          });
 
-        queueService.markCompleted(job.job_id);
+        const status =
+          result.providerResult?.status;
 
-        console.log(
-          `✓ Job #${job.job_id} completed (${result.providerResult?.status ?? "blocked"})`
-        );
+        const detail =
+          result.providerResult?.detail || "";
+
+        // SUCCESS
+
+        if (
+          status === "delivered" ||
+          status === "answered" ||
+          detail === "voicemail_left"
+        ) {
+
+          queueService.markCompleted(job.job_id);
+
+          console.log(
+            `✓ Completed via ${channel}`
+          );
+
+          continue;
+
+        }
+
+        // RETRY
+
+        const delay = retryDelay(detail);
+
+        if (delay && job.attempt < 3) {
+
+          queueService.rescheduleJob(
+            job.job_id,
+            new Date(Date.now() + delay * 60 * 1000),
+            job.attempt + 1,
+            job.fallback_index,
+            channel,
+            detail
+          );
+
+          console.log(
+            `↺ Retry ${channel} in ${delay} min`
+          );
+
+          continue;
+
+        }
+
+        // FALLBACK
+
+        const nextIndex =
+          job.fallback_index + 1;
+
+        if (nextIndex < CHANNELS.length) {
+
+          queueService.rescheduleJob(
+            job.job_id,
+            new Date(),
+            job.attempt,
+            nextIndex,
+            CHANNELS[nextIndex],
+            detail
+          );
+
+          console.log(
+            `➡ Falling back to ${CHANNELS[nextIndex]}`
+          );
+
+        } else {
+
+          queueService.markFailed(
+            job.job_id,
+            detail
+          );
+
+          console.log(
+            `✗ Permanent failure`
+          );
+
+        }
 
       } catch (err) {
 
-        console.error(`✗ Job #${job.job_id} failed`, err);
+        console.error(err);
 
-        queueService.markFailed(job.job_id);
+        queueService.markFailed(
+          job.job_id,
+          "worker_error"
+        );
 
       }
 
@@ -68,5 +173,4 @@ async function processJobs() {
 
 }
 
-console.log("Worker started.");
 setInterval(processJobs, 1000);

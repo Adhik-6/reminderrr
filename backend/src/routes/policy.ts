@@ -50,4 +50,36 @@ router.post("/evaluate", (req, res) => {
   }
 });
 
+router.get("/evidence/:residentId", (req, res) => {
+
+  const residentId = req.params.residentId;
+
+  const since = new Date(
+    Date.now() - 7 * 24 * 60 * 60 * 1000
+  ).toISOString();
+
+  const contacts = db.prepare(`
+    SELECT channel,status,attempted_at
+    FROM delivery_log
+    WHERE resident_id=?
+    AND attempted_at>=?
+    ORDER BY attempted_at DESC
+  `).all(residentId, since);
+
+  const blocked = db.prepare(`
+    SELECT blocked_at,appointment_id,reason
+    FROM blocked_contacts
+    WHERE resident_id=?
+    ORDER BY blocked_at DESC
+  `).all(residentId);
+
+  res.json({
+    residentId,
+    rolling7DayCount: contacts.length,
+    contacts,
+    blocked
+  });
+
+});
+
 export default router;

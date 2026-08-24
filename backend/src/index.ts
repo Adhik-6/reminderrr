@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 
-import { healthRoutes, appointmentRoutes, residentRoutes, simulationRoutes, fetchRoutes, deliveryRoutes, policyRoutes } from "./routes/index";
+import { healthRoutes, appointmentRoutes, residentRoutes, simulationRoutes, fetchRoutes, deliveryRoutes, policyRoutes, metricRoutes } from "./routes/index";
 
 const app = express();
 const PORT = 8000;
@@ -18,8 +18,9 @@ app.use("/simulation", simulationRoutes);
 app.use("/fetch", fetchRoutes);  
 app.use("/delivery", deliveryRoutes);
 app.use("/policy", policyRoutes);
+app.use("/metrics", metricRoutes);
 
 
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });

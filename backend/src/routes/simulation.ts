@@ -66,4 +66,77 @@ router.post("/schedule", (req, res) => {
 
 });
 
+router.post("/fill-history", (req, res) => {
+  const { residentId, appointmentId } = req.body;
+  const stmt = db.prepare(`
+    INSERT INTO delivery_log
+    (
+      resident_id,
+      appointment_id,
+      channel,
+      status,
+      detail,
+      attempted_at,
+      body_preview
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  stmt.run(
+    residentId,
+    appointmentId,
+    "sms",
+    "delivered",
+    "",
+    new Date(Date.now()-2*24*60*60*1000).toISOString(),
+    "Test"
+  );
+
+  stmt.run(
+    residentId,
+    appointmentId,
+    "voice",
+    "answered",
+    "",
+    new Date(Date.now()-1*24*60*60*1000).toISOString(),
+    "Test"
+  );
+  res.json({ success: true });
+});
+
+router.delete("/reset", (_, res) => {
+  db.exec(`
+    DELETE FROM delivery_log;
+    DELETE FROM blocked_contacts;
+    DELETE FROM reminder_queue;
+  `);
+  res.json({ success: true });
+});
+
+router.post("/run-all", (_, res) => {
+  const appointments =
+    db.prepare(`
+      SELECT
+        appointment_id,
+        resident_id
+      FROM appointments
+      ORDER BY scheduled_at ASC
+    `).all() as any[];
+
+  let seconds = 0;
+  for (const appt of appointments) {
+    queueService.addJob(
+      appt.resident_id,
+      appt.appointment_id,
+      new Date(Date.now() + seconds * 1000)
+    );
+    seconds += 0.05;
+  }
+
+  res.json({
+    success: true,
+    queued: appointments.length
+  });
+});
+
 export default router;
